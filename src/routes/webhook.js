@@ -35,6 +35,15 @@ router.post('/bank-notification', async (req, res) => {
       return res.status(400).json({ error: 'Missing required fields' });
     }
 
+    // Log thông tin giao dịch
+    console.log('Received transaction:', {
+      transaction_id,
+      amount,
+      type,
+      account,
+      timestamp: timestamp || new Date().toISOString()
+    });
+
     // Tạo nội dung thông báo
     const title = 'Thông báo giao dịch';
     const body = type === 'credit' 
@@ -50,14 +59,34 @@ router.post('/bank-notification', async (req, res) => {
       timestamp: timestamp || new Date().toISOString()
     };
 
-    // Gửi thông báo đến tất cả thiết bị đã đăng ký
-    const notifications = deviceTokens.map(token => 
-      sendNotification(token, title, body, notificationData)
-    );
+    // Chỉ gửi notification nếu có device token
+    if (deviceTokens.length > 0) {
+      try {
+        const notifications = deviceTokens.map(token => 
+          sendNotification(token, title, body, notificationData)
+        );
+        await Promise.all(notifications);
+        console.log('Notifications sent successfully');
+      } catch (error) {
+        console.error('Error sending notifications:', error);
+        // Không throw error để vẫn trả về success response
+      }
+    } else {
+      console.log('No device tokens registered, skipping notifications');
+    }
 
-    await Promise.all(notifications);
+    // Luôn trả về success response
+    res.json({ 
+      message: 'Transaction processed successfully',
+      transaction: {
+        transaction_id,
+        amount,
+        type,
+        account,
+        timestamp: timestamp || new Date().toISOString()
+      }
+    });
 
-    res.json({ message: 'Notifications sent successfully' });
   } catch (error) {
     console.error('Error processing webhook:', error);
     res.status(500).json({ error: 'Internal server error' });
