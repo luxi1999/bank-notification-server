@@ -19,22 +19,24 @@ router.post('/register-token', (req, res) => {
   res.json({ message: 'Token registered successfully' });
 });
 
-// Middleware kiểm tra API key
-const validateApiKey = (req, res, next) => {
-  const apiKey = req.headers['apikey'];
-  // TODO: Thay YOUR_SECRET_KEY bằng key thật từ Pay2S
-  const validApiKey = process.env.PAY2S_SECRET_KEY || 'YOUR_SECRET_KEY';
+// Middleware kiểm tra Bearer token
+const validateToken = (req, res, next) => {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1]; // Lấy phần sau "Bearer "
 
-  if (!apiKey || apiKey !== validApiKey) {
-    console.error('Invalid API key:', apiKey);
-    return res.status(401).json({ success: false, message: 'Invalid API key' });
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    console.error('Missing or invalid Authorization header');
+    return res.status(401).json({ success: false, message: 'Missing or invalid Authorization header' });
   }
+
+  // TODO: Validate token nếu cần
+  console.log('Received token:', token);
 
   next();
 };
 
 // Webhook nhận thông báo từ Pay2S
-router.post('/bank-notification', validateApiKey, async (req, res) => {
+router.post('/bank-notification', validateToken, async (req, res) => {
   try {
     console.log('Received webhook payload:', JSON.stringify(req.body, null, 2));
     console.log('Headers:', JSON.stringify(req.headers, null, 2));
