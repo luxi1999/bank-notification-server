@@ -19,77 +19,111 @@ router.post('/register-token', (req, res) => {
   res.json({ message: 'Token registered successfully' });
 });
 
-// Webhook nhận thông báo từ ngân hàng
-router.post('/bank-notification', async (req, res) => {
+// Middleware kiểm tra API key
+const validateApiKey = (req, res, next) => {
+  const apiKey = req.headers['apikey'];
+  // TODO: Thay YOUR_SECRET_KEY bằng key thật từ Pay2S
+  const validApiKey = process.env.PAY2S_SECRET_KEY || 'YOUR_SECRET_KEY';
+
+  if (!apiKey || apiKey !== validApiKey) {
+    console.error('Invalid API key:', apiKey);
+    return res.status(401).json({ success: false, message: 'Invalid API key' });
+  }
+
+  next();
+};
+
+// Webhook nhận thông báo từ Pay2S
+router.post('/bank-notification', validateApiKey, async (req, res) => {
   try {
-    const { 
-      transaction_id,
-      amount,
-      type, // 'credit' hoặc 'debit'
-      account,
-      timestamp 
-    } = req.body;
+    console.log('Received webhook payload:', JSON.stringify(req.body, null, 2));
+    console.log('Headers:', JSON.stringify(req.headers, null, 2));
 
-    // Validate dữ liệu
-    if (!transaction_id || !amount || !type || !account) {
-      return res.status(400).json({ error: 'Missing required fields' });
+    const { transactions } = req.body;
+
+    if (!transactions || !Array.isArray(transactions)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid payload, transactions not found or not an array'
+      });
     }
 
-    // Log thông tin giao dịch
-    console.log('Received transaction:', {
-      transaction_id,
-      amount,
-      type,
-      account,
-      timestamp: timestamp || new Date().toISOString()
-    });
+    for (const transaction of transactions) {
+      const {
+        id,
+        gateway,
+        transactionDate,
+        transactionNumber,
+        accountNumber,
+        content,
+        transferType,
+        transferAmount
+      } = transaction;
 
-    // Tạo nội dung thông báo
-    const title = 'Thông báo giao dịch';
-    const body = type === 'credit' 
-      ? `Tài khoản ${account} vừa nhận ${amount.toLocaleString()}đ`
-      : `Tài khoản ${account} vừa chi ${amount.toLocaleString()}đ`;
-
-    // Data bổ sung
-    const notificationData = {
-      transaction_id,
-      amount: amount.toString(),
-      type,
-      account,
-      timestamp: timestamp || new Date().toISOString()
-    };
-
-    // Chỉ gửi notification nếu có device token
-    if (deviceTokens.length > 0) {
-      try {
-        const notifications = deviceTokens.map(token => 
-          sendNotification(token, title, body, notificationData)
-        );
-        await Promise.all(notifications);
-        console.log('Notifications sent successfully');
-      } catch (error) {
-        console.error('Error sending notifications:', error);
-        // Không throw error để vẫn trả về success response
+      // Validate dữ liệu
+      if (!id || !transactionNumber || !accountNumber || !transferAmount) {
+        console.error('Missing required fields in transaction:', transaction);
+        continue;
       }
-    } else {
-      console.log('No device tokens registered, skipping notifications');
+
+      // Log thông tin giao dịch
+      console.log('Processing transaction:', {
+        id,
+        gateway,
+        transactionDate,
+        transactionNumber,
+        accountNumber,
+        content,
+        transferType,
+        transferAmount
+      });
+
+      // Tạo nội dung thông báo
+      const title = 'Thông báo giao dịch';
+      const body = transferType === 'IN' 
+        ? `Tài khoản ${accountNumber} vừa nhận ${transferAmount.toLocaleString()}đ`
+        : `Tài khoản ${accountNumber} vừa chi ${transferAmount.toLocaleString()}đ`;
+
+      // Data bổ sung
+      const notificationData = {
+        id,
+        gateway,
+        transactionDate,
+        transactionNumber,
+        accountNumber,
+        content,
+        transferType,
+        transferAmount: transferAmount.toString()
+      };
+
+      // Gửi notification nếu có device token
+      if (deviceTokens.length > 0) {
+        try {
+          const notifications = deviceTokens.map(token => 
+            sendNotification(token, title, body, notificationData)
+          );
+          await Promise.all(notifications);
+          console.log('Notifications sent successfully for transaction:', id);
+        } catch (error) {
+          console.error('Error sending notifications:', error);
+        }
+      } else {
+        console.log('No device tokens registered, skipping notifications');
+      }
     }
 
-    // Luôn trả về success response
-    res.json({ 
-      message: 'Transaction processed successfully',
-      transaction: {
-        transaction_id,
-        amount,
-        type,
-        account,
-        timestamp: timestamp || new Date().toISOString()
-      }
+    // Trả về success response theo format Pay2S yêu cầu
+    res.json({
+      success: true,
+      message: 'Transactions processed successfully'
     });
 
   } catch (error) {
     console.error('Error processing webhook:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
   }
 });
 
